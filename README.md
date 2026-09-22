@@ -7,13 +7,7 @@ A functional e-commerce starter with product browsing, search, cart, login-prote
 Both customers and admins can use either:
 
 1. **Email + Password**
-2. **Mobile + OTP**
-
-### Admin credentials
-- Email: `admin@tuktuk.world`
-- Password: `Admin@12345`
-- Mobile: `9956893895`
-- OTP: with `SHOW_DEV_OTP=true`, the development OTP is displayed after requesting it. For real SMS, configure Twilio Verify.
+2. **Mobile + OTP*
 
 ## Run backend
 
