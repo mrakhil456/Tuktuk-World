@@ -1,0 +1,16 @@
+@"
+client/node_modules/
+client/dist/
+client/.env
+client/.env.local
+client/.env.*.local
+
+server/node_modules/
+server/.env
+server/.env.local
+server/.env.*.local
+
+*.log
+.DS_Store
+Thumbs.db
+"@ | Out-File -Encoding utf8 .gitignore
