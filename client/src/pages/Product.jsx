@@ -1,681 +1,243 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Bell,
-  Plus,
-  Pencil,
-  Trash2,
-  Check
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, ShoppingCart } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import ProductCard from '../components/ProductCard';
 
-const empty = {
-  name: '',
-  description: '',
-  price: '',
-  category: '',
-  image: '',
-  stock: '',
-  featured: false
+const getProducts = (response) => {
+  const data = response.data;
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.products)) {
+    return data.products;
+  }
+
+  throw new Error('Unexpected products response.');
 };
 
-export default function Admin() {
-  const { api } = useStore();
+export default function Product() {
+  const { id } = useParams();
+  const { api, add, user } = useStore();
 
-  const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [notes, setNotes] = useState([]);
-
-  const [form, setForm] = useState(empty);
-  const [editing, setEditing] = useState(null);
-  const [showForm, setShowForm] = useState(false);
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-
-  const productFormRef = useRef(null);
-
-  // =========================
-  // LOAD ADMIN DATA
-  // =========================
-  const load = async () => {
-    try {
-      const [p, o, u, n] = await Promise.all([
-        api.get('/products'),
-        api.get('/orders'),
-        api.get('/users'),
-        api.get('/notifications')
-      ]);
-
-      setProducts(p.data);
-      setOrders(o.data);
-      setUsers(u.data);
-      setNotes(n.data);
-    } catch (e) {
-      setError(
-        e.response?.data?.message ||
-          'Unable to load admin data.'
-      );
-    }
-  };
+  const [relatedProducts, setRelatedProducts] = useState([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedError, setRelatedError] = useState('');
+  const [added, setAdded] = useState(false);
 
   useEffect(() => {
-    load();
-  }, []);
+    let active = true;
 
-  // =========================
-  // OPEN ADD PRODUCT FORM
-  // =========================
-  const handleAddProduct = () => {
-    console.log('Add new product clicked');
+    const fetchProduct = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        setProduct(null);
+        setAdded(false);
 
-    setError('');
-    setForm({ ...empty });
-    setEditing(null);
-    setShowForm(true);
-  };
+        const response = await api.get(`/products/${id}`);
 
-  // =========================
-  // SCROLL TO PRODUCT FORM
-  // =========================
-  useEffect(() => {
-    if (showForm && productFormRef.current) {
-      setTimeout(() => {
-        productFormRef.current.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start'
-        });
-      }, 100);
-    }
-  }, [showForm]);
+        if (active) {
+          setProduct(response.data?.product || response.data);
+        }
+      } catch (err) {
+        console.error('Product loading error:', err);
 
-  // =========================
-  // SAVE PRODUCT
-  // =========================
-  const saveProduct = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    try {
-      const payload = {
-        ...form,
-        name: form.name.trim(),
-        description: form.description.trim(),
-        category: form.category.trim(),
-        image: form.image.trim(),
-        price: Number(form.price),
-        stock: Number(form.stock),
-        featured: Boolean(form.featured)
-      };
-
-      if (editing) {
-        await api.put(
-          `/products/${editing}`,
-          payload
-        );
-      } else {
-        await api.post(
-          '/products',
-          payload
-        );
+        if (active) {
+          setError(
+            err.response?.data?.message ||
+            'Unable to load product details.'
+          );
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
+    };
 
-      setForm({ ...empty });
-      setEditing(null);
-      setShowForm(false);
+    fetchProduct();
 
-      await load();
-    } catch (e) {
-      console.error('Save product error:', e);
+    return () => {
+      active = false;
+    };
+  }, [id, api]);
 
-      setError(
-        e.response?.data?.message ||
-          e.response?.data?.error ||
-          'Unable to save product.'
-      );
-    }
-  };
-
-  // =========================
-  // EDIT PRODUCT
-  // =========================
-  const edit = (p) => {
-    setEditing(p._id);
-
-    setForm({
-      name: p.name || '',
-      description: p.description || '',
-      price: p.price ?? '',
-      category: p.category || '',
-      image: p.image || '',
-      stock: p.stock ?? '',
-      featured: !!p.featured
-    });
-
-    setShowForm(true);
-  };
-
-  // =========================
-  // DELETE PRODUCT
-  // =========================
-  const del = async (id) => {
-    if (!window.confirm('Delete this product?')) {
-      return;
+  useEffect(() => {
+    if (!product?._id) {
+      setRelatedProducts([]);
+      return undefined;
     }
 
-    try {
-      setError('');
+    let active = true;
 
-      await api.delete(
-        '/products/' + id
-      );
+    const fetchRelatedProducts = async () => {
+      try {
+        setRelatedLoading(true);
+        setRelatedError('');
 
-      await load();
-    } catch (e) {
-      setError(
-        e.response?.data?.message ||
-          'Unable to delete product.'
-      );
-    }
-  };
+        const response = await api.get('/products');
+        const products = getProducts(response).filter(
+          (item) => String(item._id) !== String(product._id)
+        );
+        const category = String(product.category || '').trim().toLowerCase();
+        const matchingCategory = category
+          ? products.filter(
+              (item) =>
+                String(item.category || '').trim().toLowerCase() === category
+            )
+          : [];
+        const recommendations = [
+          ...matchingCategory,
+          ...products.filter((item) => !matchingCategory.includes(item))
+        ].slice(0, 4);
 
-  // =========================
-  // UPDATE ORDER STATUS
-  // =========================
-  const upd = async (id, status) => {
-    try {
-      setError('');
+        if (active) {
+          setRelatedProducts(recommendations);
+        }
+      } catch (err) {
+        console.error('Related products loading error:', err);
 
-      await api.put(
-        '/orders/' + id + '/status',
-        { status }
-      );
+        if (active) {
+          setRelatedError('Related products are unavailable right now.');
+        }
+      } finally {
+        if (active) {
+          setRelatedLoading(false);
+        }
+      }
+    };
 
-      await load();
-    } catch (e) {
-      setError(
-        e.response?.data?.message ||
-          'Unable to update order.'
-      );
-    }
-  };
+    fetchRelatedProducts();
 
-  // =========================
-  // MARK NOTIFICATION READ
-  // =========================
-  const read = async (id) => {
-    try {
-      await api.patch(
-        '/notifications/' + id + '/read'
-      );
+    return () => {
+      active = false;
+    };
+  }, [api, product]);
 
-      await load();
-    } catch (e) {
-      setError(
-        e.response?.data?.message ||
-          'Unable to update notification.'
-      );
-    }
-  };
-
-  // =========================
-  // STATS
-  // =========================
-  const unread = notes.filter(
-    (n) => !n.read
-  ).length;
-
-  const revenue = orders
-    .filter(
-      (o) =>
-        o.paymentStatus === 'PAID' ||
-        o.paymentMethod === 'COD'
-    )
-    .reduce(
-      (a, x) => a + Number(x.total || 0),
-      0
+  if (loading) {
+    return (
+      <section className="section">
+        <p className="muted">Loading product details...</p>
+      </section>
     );
+  }
 
-  // =========================
-  // UI
-  // =========================
+  if (error || !product) {
+    return (
+      <section className="section">
+        <h2>Product not found</h2>
+
+        <p className="error">
+          {error || 'This product is not available.'}
+        </p>
+
+        <Link to="/shop" className="secondary">
+          <ArrowLeft size={17} />
+          Back to Shop
+        </Link>
+      </section>
+    );
+  }
+
+  const inStock = Number(product.stock) > 0;
+  const adminUser = user?.role === 'admin';
+
   return (
-    <section className="section admin-page">
+    <>
+      <section className="product">
+        <img
+          className="product-image"
+          src={product.image}
+          alt={product.name || 'Product image'}
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+          }}
+        />
 
-      {/* =========================
-          ADMIN TITLE
-      ========================= */}
-      <div className="admin-title">
-        <div>
+        <div className="product-info">
+          <Link to="/shop" className="back">
+            <ArrowLeft size={17} />
+            Back to Shop
+          </Link>
+
           <span className="eyebrow">
-            CONTROL CENTER
+            {product.category || 'PET ESSENTIALS'}
           </span>
 
-          <h1>Admin Dashboard</h1>
-        </div>
+          <h1>{product.name}</h1>
 
-        <button
-          type="button"
-          className="primary"
-          onClick={handleAddProduct}
-        >
-          <Plus size={18} />
-          Add new product
-        </button>
-      </div>
-
-      {/* =========================
-          ERROR
-      ========================= */}
-      {error && (
-        <p className="error">
-          {error}
-        </p>
-      )}
-
-      {/* =========================
-          STATS
-      ========================= */}
-      <div className="stats">
-        <div>
-          <small>Products</small>
-          <b>{products.length}</b>
-        </div>
-
-        <div>
-          <small>Users</small>
-          <b>{users.length}</b>
-        </div>
-
-        <div>
-          <small>Orders</small>
-          <b>{orders.length}</b>
-        </div>
-
-        <div>
-          <small>Revenue</small>
-          <b>
-            ₹{revenue.toLocaleString('en-IN')}
-          </b>
-        </div>
-      </div>
-
-      {/* =================================================
-          ADD / EDIT PRODUCT FORM
-          THIS IS NOW DIRECTLY AFTER THE STATS
-      ================================================= */}
-      {showForm && (
-        <div
-          ref={productFormRef}
-          className="adminbox product-form-box"
-        >
-          <div className="box-head">
-            <h2>
-              {editing
-                ? 'Edit product'
-                : 'Add new product'}
-            </h2>
+          <div className="big-price">
+            ₹{Number(product.price || 0).toLocaleString('en-IN')}
           </div>
 
-          <form
-            className="product-form"
-            onSubmit={saveProduct}
+          <p className="product-description">
+            {product.description || 'Quality product from Tuktuk World.'}
+          </p>
+
+          <p className={`product-stock ${inStock ? 'in-stock' : 'out-of-stock'}`}>
+            {inStock
+              ? `${product.stock} items available`
+              : 'Currently out of stock'}
+          </p>
+
+          <button
+            type="button"
+            className="primary product-add"
+            disabled={!inStock || adminUser}
+            onClick={() => {
+              add(product);
+              setAdded(true);
+            }}
           >
+            <ShoppingCart size={19} />
+            {adminUser
+              ? 'Customer cart unavailable to admins'
+              : inStock
+                ? added
+                  ? 'Add another'
+                  : 'Add to Cart'
+                : 'Out of Stock'}
+          </button>
 
-            {/* PRODUCT NAME */}
-            <input
-              required
-              type="text"
-              placeholder="Product name"
-              value={form.name}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  name: e.target.value
-                })
-              }
-            />
-
-            {/* CATEGORY */}
-            <input
-              required
-              type="text"
-              placeholder="Category (e.g. Dog Food)"
-              value={form.category}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  category: e.target.value
-                })
-              }
-            />
-
-            {/* PRICE */}
-            <input
-              required
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="Price (₹)"
-              value={form.price}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  price: e.target.value
-                })
-              }
-            />
-
-            {/* STOCK */}
-            <input
-              required
-              type="number"
-              min="0"
-              placeholder="Stock"
-              value={form.stock}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  stock: e.target.value
-                })
-              }
-            />
-
-            {/* IMAGE */}
-            <input
-              required
-              type="text"
-              className="wide"
-              placeholder="Product image URL"
-              value={form.image}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  image: e.target.value
-                })
-              }
-            />
-
-            {/* DESCRIPTION */}
-            <textarea
-              className="wide"
-              placeholder="Product description"
-              value={form.description}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  description: e.target.value
-                })
-              }
-            />
-
-            {/* FEATURED */}
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={form.featured}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    featured: e.target.checked
-                  })
-                }
-              />
-
-              Featured product
-            </label>
-
-            {/* BUTTONS */}
-            <div className="form-actions">
-
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditing(null);
-                  setForm({ ...empty });
-                }}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                className="primary"
-              >
-                {editing
-                  ? 'Update product'
-                  : 'Create product'}
-              </button>
-
-            </div>
-          </form>
+          {added && (
+            <p className="product-added" role="status" aria-live="polite">
+              Added to your cart. <Link to="/cart">View cart</Link>
+            </p>
+          )}
         </div>
-      )}
+      </section>
 
-      {/* =========================
-          ADMIN MESSAGES
-      ========================= */}
-      <div className="adminbox notifications">
-
-        <div className="box-head">
-          <h2>
-            <Bell size={20} />
-            Admin messages
-          </h2>
-
-          <span
-            className={
-              unread
-                ? 'badge unread'
-                : 'badge'
-            }
-          >
-            {unread} unread
-          </span>
+      <section className="section related-products" aria-labelledby="related-title">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">MORE TO LOVE</span>
+            <h2 id="related-title">You may also like</h2>
+          </div>
+          <Link to="/shop">
+            View all products <ArrowRight size={17} />
+          </Link>
         </div>
 
-        {!notes.length ? (
-          <p className="muted">
-            No admin messages yet. New COD
-            orders will appear here.
-          </p>
+        {relatedLoading ? (
+          <p className="muted" role="status">Finding products for you...</p>
+        ) : relatedError ? (
+          <p className="error" role="alert">{relatedError}</p>
+        ) : relatedProducts.length ? (
+          <div className="grid">
+            {relatedProducts.map((item) => (
+              <ProductCard key={item._id} p={item} />
+            ))}
+          </div>
         ) : (
-          notes.map((n) => (
-            <div
-              className={
-                n.read
-                  ? 'notification'
-                  : 'notification unread-note'
-              }
-              key={n._id}
-            >
-
-              <div>
-                <b>{n.title}</b>
-
-                <p>
-                  {n.message}
-                </p>
-
-                <small>
-                  {new Date(
-                    n.createdAt
-                  ).toLocaleString()}
-                </small>
-              </div>
-
-              {!n.read && (
-                <button
-                  type="button"
-                  className="small-btn"
-                  onClick={() =>
-                    read(n._id)
-                  }
-                >
-                  <Check size={15} />
-                  Mark read
-                </button>
-              )}
-
-            </div>
-          ))
+          <p className="muted">No other products are available yet.</p>
         )}
-
-      </div>
-
-      {/* =========================
-          PRODUCTS
-      ========================= */}
-      <div className="adminbox">
-
-        <div className="box-head">
-          <h2>Products</h2>
-
-          <span>
-            {products.length} total
-          </span>
-        </div>
-
-        {!products.length ? (
-          <p className="muted">
-            No products available.
-          </p>
-        ) : (
-          products.map((x) => (
-            <div
-              className="row"
-              key={x._id}
-            >
-
-              <div className="admin-product">
-
-                <img
-                  src={x.image}
-                  alt={x.name || 'Product'}
-                />
-
-                <span>
-                  <b>{x.name}</b>
-
-                  <small>
-                    {x.category} · Stock {x.stock}
-                  </small>
-                </span>
-
-              </div>
-
-              <strong>
-                ₹{Number(
-                  x.price || 0
-                ).toLocaleString('en-IN')}
-              </strong>
-
-              <button
-                type="button"
-                className="small-btn"
-                onClick={() => edit(x)}
-              >
-                <Pencil size={15} />
-                Edit
-              </button>
-
-              <button
-                type="button"
-                className="danger-btn"
-                onClick={() =>
-                  del(x._id)
-                }
-              >
-                <Trash2 size={15} />
-                Delete
-              </button>
-
-            </div>
-          ))
-        )}
-
-      </div>
-
-      {/* =========================
-          ORDERS
-      ========================= */}
-      <div className="adminbox">
-
-        <div className="box-head">
-          <h2>Orders</h2>
-
-          <span>
-            {orders.length} total
-          </span>
-        </div>
-
-        {!orders.length ? (
-          <p className="muted">
-            No orders available.
-          </p>
-        ) : (
-          orders.map((x) => (
-            <div
-              className="row"
-              key={x._id}
-            >
-
-              <span>
-                <b>
-                  #{x._id.slice(-8)}
-                </b>{' '}
-                —{' '}
-                {x.user?.name ||
-                  'Customer'}
-
-                <small>
-                  {x.paymentMethod} ·{' '}
-                  {x.paymentStatus}
-                </small>
-              </span>
-
-              <strong>
-                ₹{Number(
-                  x.total || 0
-                ).toLocaleString('en-IN')}
-              </strong>
-
-              <select
-                value={x.status}
-                onChange={(e) =>
-                  upd(
-                    x._id,
-                    e.target.value
-                  )
-                }
-              >
-                <option value="PLACED">
-                  PLACED
-                </option>
-
-                <option value="PROCESSING">
-                  PROCESSING
-                </option>
-
-                <option value="SHIPPED">
-                  SHIPPED
-                </option>
-
-                <option value="DELIVERED">
-                  DELIVERED
-                </option>
-
-                <option value="CANCELLED">
-                  CANCELLED
-                </option>
-              </select>
-
-            </div>
-          ))
-        )}
-
-      </div>
-
-    </section>
+      </section>
+    </>
   );
 }
